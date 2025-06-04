@@ -8,7 +8,7 @@ Ein automatischer Bot zum Erstellen und Veröffentlichen von Geschichten auf Sto
 - Erstellung passender Titel
 - Generierung von Bildern mit DALL-E 3
 - Automatisches Hochladen auf StoryOne
-- Selenium-basierte Web-Automation
+- Playwright-basierte Web-Automation
 
 ## Installation
 
@@ -34,7 +34,6 @@ pip install -r requirements.txt
 4. `.env` Datei erstellen und API-Keys eintragen:
 ```
 OPENAI_API_KEY=your_openai_api_key
-GOOGLE_BOOKS_API_KEY=your_google_books_api_key
 EMAIL=your_storyone_email
 PASSWORD=your_storyone_password
 ```
@@ -50,7 +49,7 @@ python 2024_12_26_Bot_Story_One.py
 ## Abhängigkeiten
 
 - Python 3.x
-- Selenium
+- Playwright
 - OpenAI
 - python-dotenv
 - requests
