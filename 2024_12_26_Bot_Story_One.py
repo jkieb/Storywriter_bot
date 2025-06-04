@@ -2,6 +2,7 @@
 import time
 import os
 import random
+import requests
 from playwright.sync_api import sync_playwright
 from openai import OpenAI
 from PIL import Image
@@ -15,7 +16,29 @@ load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=openai_key) if openai_key else None
 
+def fetch_random_wikipedia_summary():
+    """Fetch a random article summary from German Wikipedia."""
+    try:
+        response = requests.get(
+            "https://de.wikipedia.org/api/rest_v1/page/random/summary", timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("extract", "")
+    except Exception as exc:
+        print(f"Fehler beim Abrufen der Wikipedia-Zusammenfassung: {exc}")
+    return ""
 
+
+def download_image(url: str, path: str) -> None:
+    """Download image from the given URL to the specified path."""
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        with open(path, "wb") as f:
+            f.write(resp.content)
+    except Exception as exc:
+        raise RuntimeError(f"Bild konnte nicht heruntergeladen werden: {exc}")
 
 # def generate_random_keywords(n=50):
 #     """
@@ -255,17 +278,21 @@ def generate_story_prompt():
     return prompt
 
 if __name__ == "__main__":
-    for i in range(1):
+    for _ in range(1):
         try:
-            # Testdaten statt API-Aufrufe
-            book_description = "Eine Testgeschichte"
-            chapter_title = "Test-Titel"
-            short_plot = "Dies ist ein Test-Plot für die Automatisierung."
-            bild = "https://example.com/test-image.jpg"  # Dummy-URL
-            
-            print(f"Test-Prompt: {book_description}")
-            print(f"Test-Titel: {chapter_title}")
-            print(f"Test-Geschichte:\n{short_plot}")
+            # Eine zufällige Beschreibung aus Wikipedia holen
+            book_description = fetch_random_wikipedia_summary()
+            if not book_description:
+                print("Keine Beschreibung erhalten, überspringe Lauf.")
+                continue
+
+            chapter_title = generate_chapter_title(book_description, client)
+            short_plot = generate_short_plot(book_description, client)
+            bild = generate_image_from_prompt(short_plot, client)
+
+            print(f"Prompt: {book_description}")
+            print(f"Titel: {chapter_title}")
+            print(f"Geschichte:\n{short_plot}")
             
             # Playwright Setup
             slow_mo_value = 500 if os.getenv("PLAYWRIGHT_SLOWMO") == "1" else None
@@ -332,12 +359,10 @@ if __name__ == "__main__":
                     # Upload image
                     page.click("button.edit-image-button__button")
                     page.click("text=Upload")
-                    
-                    # Test-Bild erstellen
-                    temp_file_path = "/tmp/test_image.jpg"
-                    with Image.new('RGB', (100, 100), color='red') as img:
-                        img.save(temp_file_path)
-                    
+
+                    temp_file_path = "/tmp/story_image.jpg"
+                    download_image(bild, temp_file_path)
+
                     # Upload the image
                     page.set_input_files("input[type='file']", temp_file_path)
                     page.click("text=Done")
@@ -353,6 +378,13 @@ if __name__ == "__main__":
                     page.click("button:has-text('Share on StoryOne')")
                     page.wait_for_load_state("networkidle")
 
+                    # Logout
+                    try:
+                        page.click("text=Logout")
+                        page.wait_for_load_state("networkidle")
+                    except Exception:
+                        pass
+
                     # Wait before closing
                     time.sleep(10)
                     print("Browser wird geschlossen...")
@@ -367,3 +399,4 @@ if __name__ == "__main__":
             print(f"Fehler: {e}")
             time.sleep(60)
             pass
+
