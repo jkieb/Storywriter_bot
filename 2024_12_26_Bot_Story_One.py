@@ -6,12 +6,7 @@ import random
 import requests
 import json
 import string
-from selenium import webdriver
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException
+from playwright.sync_api import sync_playwright
 from openai import OpenAI
 from PIL import Image
 from dotenv import load_dotenv
@@ -56,8 +51,17 @@ def generate_image_from_prompt(short_plot, client):
     client = client
 
     response = client.images.generate(
-        model="dall-e-3",
-        prompt=f" Never put text on your picture. Do not write anything on the image. Make image based on the following: {short_plot}",
+        model="dall-e-3",  # Bestes verfügbares Bildgenerierungsmodell
+        prompt=f"""Erstelle ein künstlerisches, hochwertiges Bild basierend auf dieser Geschichte: {short_plot}
+        
+        Wichtige Anforderungen:
+        - Keine Texte oder Wörter im Bild
+        - Fokussiere auf die wichtigste Szene oder den emotionalsten Moment
+        - Verwende eine ansprechende Komposition
+        - Achte auf Details und Atmosphäre
+        - Wähle passende Farben und Stimmung
+        - Erstelle ein Bild im Stil eines professionellen Buchcovers
+        - Stelle sicher, dass das Bild die Essenz der Geschichte einfängt""",
         size="1024x1024",
         quality="standard",
         n=1,
@@ -70,12 +74,33 @@ def generate_image_from_prompt(short_plot, client):
 
 def generate_chapter_title(story_description):
     completion = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4-1106-preview",  # GPT-4 Turbo
         messages=[
-            {"role": "system", "content": "Du bist ein hilfreicher Assistent."},
+            {"role": "system", "content": """Du bist ein Experte für kreative Titel.
+            Deine Titel sind:
+            - Einprägsam und originell
+            - Neugierig machend
+            - Passend zum Inhalt
+            - Nicht zu lang
+            - Mit emotionalem Impact
+            
+            Ein guter Titel sollte:
+            - Die Essenz der Geschichte einfangen
+            - Neugier wecken
+            - Zum Weiterlesen anregen
+            - Die Stimmung der Geschichte widerspiegeln"""},
             {
                 "role": "user",
-                "content": f"Schreibe auf Deutsch. Generiere einen guten Kapitel-Titel. Schreibe nur den Titel, nichts anderes. Verwende nicht mehr als sechs Wörter. Setze ihn niemals in Anführungszeichen. Nutze für den Titel nur Wörter aus: {story_description}."
+                "content": f"""Generiere einen fesselnden Titel für eine Geschichte basierend auf: {story_description}
+                
+                Wichtige Anforderungen:
+                - Maximal 6 Wörter
+                - Keine Anführungszeichen
+                - Nur Wörter aus der Beschreibung verwenden
+                - Der Titel soll neugierig machen
+                - Der Titel soll die Stimmung der Geschichte einfangen
+                - Der Titel soll zum Inhalt passen
+                - Der Titel soll emotional ansprechend sein"""
             }
         ]
     )
@@ -84,12 +109,43 @@ def generate_chapter_title(story_description):
 
 def generate_short_plot(story_description):
     completion = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4-1106-preview",  # GPT-4 Turbo
         messages=[
-            {"role": "system", "content": "Du bist ein hilfreicher Assistent."},
+            {"role": "system", "content": """Du bist ein erfahrener Geschichtenerzähler mit folgenden Fähigkeiten:
+            - Erstellung fesselnder Geschichten mit klarer Struktur
+            - Entwicklung lebendiger Charaktere
+            - Schreiben natürlicher Dialoge
+            - Aufbau von Spannung und Emotion
+            - Schaffen einer immersiven Atmosphäre
+            
+            Deine Geschichten folgen dieser Struktur:
+            1. Einleitung: Einführung der Hauptfigur und des Settings
+            2. Aufbau: Entwicklung des Konflikts oder der Herausforderung
+            3. Höhepunkt: Die entscheidende Wendung oder Aktion
+            4. Auflösung: Eine befriedigende Lösung oder Erkenntnis
+            
+            Stilistische Merkmale:
+            - Lebendige Beschreibungen
+            - Abwechslungsreiche Satzlängen
+            - Authentische Dialoge
+            - Emotionale Tiefe
+            - Klare Absätze für bessere Lesbarkeit"""},
             {
                 "role": "user",
-                "content": f"Schreibe 400 Wörter lang. Schreibe auf Deutsch. Erstelle den Text basierend auf folgende Beschreibung: {story_description}."
+                "content": f"""Erstelle eine fesselnde Geschichte basierend auf: {story_description}
+                
+                Wichtige Anforderungen:
+                - Schreibe maximal 400 Wörter
+                - Verwende die vorgegebene Struktur (Einleitung, Aufbau, Höhepunkt, Auflösung)
+                - Erstelle mindestens einen interessanten Charakter mit Persönlichkeit
+                - Baue mindestens einen natürlichen Dialog ein
+                - Beschreibe die Umgebung und Stimmung detailliert
+                - Verwende verschiedene Satzlängen für einen flüssigen Lesefluss
+                - Teile den Text in sinnvolle Absätze
+                - Baue Spannung auf
+                - Achte auf einen logischen Handlungsverlauf
+                - Verwende bildhafte Sprache
+                - Schreibe in einem leicht lesbaren, aber ansprechenden Stil"""
             }
         ]
     )
@@ -257,218 +313,219 @@ def close_popup_if_present(driver):
     except:
         pass
 
+def generate_story_prompt():
+    """
+    Generiert einen kohärenten, aber zufälligen Story-Prompt.
+    Kombiniert verschiedene Elemente zu einer interessanten Geschichte.
+    Deckt alle Genres ab: Sci-Fi, Fantasy, Krimi, Thriller, Drama, Komödie, etc.
+    """
+    # Verschiedene Story-Elemente
+    settings = [
+        # Moderne Settings
+        "in einem trendigen Co-Working Space", "in einer versteckten Bar", "in einem Luxushotel",
+        "in einem verlassenen Einkaufszentrum", "in einem U-Bahn-Tunnel", "in einem Hochhaus",
+        "in einem verschneiten Skigebiet", "in einem überfüllten Flughafen", "in einem geheimen Labor",
+        "in einem versteckten Bunker", "in einem alten Kino", "in einem verlassenen Vergnügungspark",
+        
+        # Sci-Fi Settings
+        "auf einer Raumstation", "in einer virtuellen Realität", "in einer alternativen Zukunft",
+        "in einer künstlichen Intelligenz", "in einer Quantenwelt", "in einer Zeitmaschine",
+        "auf einem fremden Planeten", "in einer Dystopie", "in einer post-apokalyptischen Welt",
+        
+        # Fantasy Settings
+        "in einer magischen Dimension", "in einem verzauberten Wald", "in einer Unterwasserwelt",
+        "in einer Parallelwelt", "in einem magischen Königreich", "in einer mythischen Stadt",
+        
+        # Natur Settings
+        "in einem tropischen Regenwald", "in einer Wüste", "auf einem Gletscher",
+        "in einem Korallenriff", "in einer Höhle", "auf einem Vulkan",
+        
+        # Urban Settings
+        "in einer Großstadt", "in einem Vorort", "in einem Slum",
+        "in einem Nobelviertel", "in einem Industriegebiet", "in einem Hafen"
+    ]
+    
+    characters = [
+        # Moderne Charaktere
+        "ein erfolgreicher Tech-Entrepreneur", "eine investigative Journalistin", "ein genialer Hacker",
+        "eine berühmte Influencerin", "ein mysteriöser Künstler", "ein ehemaliger Spion",
+        "eine ambitionierte Anwältin", "ein verrückter Wissenschaftler", "eine mutige Aktivistin",
+        "ein talentierter Musiker", "ein geheimnisvoller Detektiv", "eine geniale Programmiererin",
+        
+        # Alltagscharaktere
+        "ein Taxifahrer", "eine Barista", "ein Postbote",
+        "eine Krankenschwester", "ein Lehrer", "ein Koch",
+        
+        # Ungewöhnliche Charaktere
+        "ein Zeitreisender", "ein Alien", "ein Android",
+        "ein Geist", "ein Mutant", "ein Superheld",
+        
+        # Professionelle Charaktere
+        "ein Chirurg", "ein Architekt", "ein Psychologe",
+        "ein Polizist", "ein Politiker", "ein Anwalt"
+    ]
+    
+    conflicts = [
+        # Moderne Konflikte
+        "muss eine Verschwörung aufdecken", "kämpft gegen eine KI-Bedrohung", "versucht einen Hackerangriff zu stoppen",
+        "muss ein Unternehmen retten", "kämpft gegen Korruption", "versucht eine Pandemie zu verhindern",
+        "muss eine Geheimwaffe zerstören", "kämpft gegen Cyberkriminalität", "versucht eine Revolution zu starten",
+        
+        # Persönliche Konflikte
+        "muss eine schwierige Entscheidung treffen", "kämpft gegen eine Sucht", "versucht eine Beziehung zu retten",
+        "muss mit einem Trauma umgehen", "kämpft gegen Vorurteile", "versucht sich selbst zu finden",
+        
+        # Gesellschaftliche Konflikte
+        "muss gegen Ungerechtigkeit kämpfen", "versucht die Umwelt zu retten", "kämpft für Menschenrechte",
+        "muss eine Gemeinschaft retten", "versucht Frieden zu stiften", "kämpft gegen Diskriminierung",
+        
+        # Übernatürliche Konflikte
+        "muss ein magisches Artefakt finden", "kämpft gegen eine dunkle Macht", "versucht die Zeit zu ändern",
+        "muss ein Portal schließen", "kämpft gegen ein Monster", "versucht eine Prophezeiung zu erfüllen"
+    ]
+    
+    themes = [
+        # Moderne Themen
+        "über Technologie und Menschlichkeit", "über Social Media und Identität", "über Klimawandel und Verantwortung",
+        "über künstliche Intelligenz und Ethik", "über Globalisierung und Kultur", "über Digitalisierung und Privatsphäre",
+        
+        # Gesellschaftliche Themen
+        "über Macht und Korruption", "über Gerechtigkeit und Gleichheit", "über Freiheit und Sicherheit",
+        "über Tradition und Fortschritt", "über Individualität und Konformität", "über Armut und Reichtum",
+        
+        # Persönliche Themen
+        "über Liebe und Verlust", "über Freundschaft und Verrat", "über Familie und Identität",
+        "über Träume und Realität", "über Vergangenheit und Zukunft", "über Leben und Tod",
+        
+        # Philosophische Themen
+        "über Gut und Böse", "über Wahrheit und Lüge", "über Schicksal und freier Wille",
+        "über Realität und Illusion", "über Wissen und Weisheit", "über Glaube und Wissenschaft"
+    ]
+    
+    # Zufällige Auswahl der Elemente
+    setting = random.choice(settings)
+    character = random.choice(characters)
+    conflict = random.choice(conflicts)
+    theme = random.choice(themes)
+    
+    # Zusammenstellung des Prompts
+    prompt = f"Eine Geschichte {setting}, in der {character} {conflict} {theme}."
+    
+    return prompt
+
 if __name__ == "__main__":
     for i in range(1):
         try:
-            #Beginn des Codes
-            book_description = "Schreibe über "
-            print(book_description) 
-            if book_description== None:
-                continue
+            # Testdaten statt API-Aufrufe
+            book_description = "Eine Testgeschichte"
+            chapter_title = "Test-Titel"
+            short_plot = "Dies ist ein Test-Plot für die Automatisierung."
+            bild = "https://example.com/test-image.jpg"  # Dummy-URL
             
+            print(f"Test-Prompt: {book_description}")
+            print(f"Test-Titel: {chapter_title}")
+            print(f"Test-Geschichte:\n{short_plot}")
             
-            chapter_title = generate_chapter_title(book_description)
-            
-            print(chapter_title)
-
-            # Beispiel: Generiere einen kurzen Plot
-            short_plot = generate_short_plot(book_description)
-            short_plot = short_plot.replace('\n\n', '\n')
-            print(short_plot)
-
-            bild= generate_image_from_prompt(chapter_title, client)
-            # Set up the driver
-            os.environ['PATH'] += ':/opt/homebrew/bin'
-            driver = webdriver.Chrome()
-            driver.get("https://www.story.one/en/")
-            driver.maximize_window()
-
-            time.sleep(1)
-
-            # Warte auf den Login-Button und finde ihn mit dem passenden XPath
-            login_button =driver.find_element(By.XPATH, "//span[@class='button__label' and text()='Login/Signup']")
-            login_button.click()
-            # time.sleep(1)
-            email_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//input[@name='login-email']"))
-            )
-            placeholder_email = os.getenv("EMAIL")  # Platzhalter-E-Mail
-            email_input.send_keys(placeholder_email)
-            time.sleep(1)
-
-            # Warte auf das Passwort-Eingabefeld und finde es mit dem passenden XPath
-            password_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//input[@name='login-password']"))
-            )
-
-            # Passwort in das Eingabefeld eintippen (Beispiel-Passwort)
-            placeholder_password = os.getenv("PASSWORD")  # Platzhalter-Passwort
-            password_input.send_keys(placeholder_password)
-            time.sleep(1)
-
-            # Warte auf den Login-Button und finde ihn mit XPath
-            login_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//span[@class='button__label' and text()='Login']"))
-            )
-
-            # Login-Button klicken
-            login_button.click()
-
-            time.sleep(5)
-
-
-            # Warte auf das Cookies-Element und finde es mit dem absoluten XPath
-            button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "/html/body/div/section/div/div[2]/button[2]"))
-            )
-
-            # Button klicken
-            button.click()
-
-
-            # Warte auf das Draft-Element und finde es mit dem absoluten XPath
-            button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "/html/body/div/div[4]/div/div/div[2]/div[1]/div[3]/a/div/span"))
-            )
-
-            # Button klicken
-            button.click()
-            # Warte auf das Element und finde es mit dem absoluten XPath
-            try:
-                button = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "/html/body/div/div[4]/div/div[2]/div/div/div/section[4]/div/div/fieldset/div/div[3]/label/span[2]"))
-                )
-                # Button klicken
-                button.click()
-            except:
-                try:
-                    button = WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, "//span[@data-v-f67ac2ca='' or contains(@class, 'radio-button-option__label__text') or text()='Stories']"))
-                    )
-                    # Button klicken
-                    button.click()
-                except Exception as e:
-                    print(f"Element konnte nicht gefunden oder angeklickt werden: {e}")
-            try:
-                # Warte auf den "Story schreiben" Button und finde ihn mit dem absoluten XPath
-                # Call the function to close the popup if it appears
-                #close_popup_if_present(driver)
-                story_button = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "/html/body/div/div[4]/div/div[2]/div/div/div/section[4]/div[2]/div[2]/a[1]/div/span"))
-                )
-                # "Story schreiben" Button klicken
-                story_button.click()
-            except:
-                # Call the function to close the popup if it appears
-                #close_popup_if_present(driver)
-                # Falls der "Story schreiben" Button nicht gefunden wird, klicke stattdessen auf den angegebenen Link
-                alternative_button = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//a[contains(@class, 'book-card__main-anchor')]"))
-                )
-                alternative_button.click()
-
-            close_popup_if_present(driver)
-
-            # Warte auf das Titelfeld und finde es mit dem absoluten XPath
-            title_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//textarea[@name='Title']"))
-            )
-            # Lösche den Inhalt des Titelfeldes, falls vorhanden
-            title_input.clear()
-            # Schreibe den Titel in das Textfeld
-            title_input.send_keys(chapter_title)
-
-            # Drücke um die eigentliche Story zu schreiben
-            try:
-                # Warte auf das Element und finde es mit dem passenden CSS-Selektor
-                element = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "/html/body/div/div[3]/div/section/section/div[1]/div[2]/div[3]/div/div/button"))
-                )
-            except:
-                # Falls das Element nicht gefunden wird, verwende den ursprünglichen CSS-Selektor
-                element = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "/html/body/div[1]/div[3]/div/section/section/div[1]/div[2]/div[3]/div/div/button"))
-                )
-            time.sleep(1)
-            # Element klicken
-            element.click()
-
-            # Warte auf das Textfeld und finde es mit dem passenden XPath
-            try:
-                story_textarea = WebDriverWait(driver, 20).until(
-                    EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div[3]/div/section/div/div[2]/div[2]/div[2]/div[2]/p"))
-                )
-            except Exception:
-                try:
-                    story_textarea = WebDriverWait(driver, 20).until(
-                        EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div[3]/div/section/div/div[2]/div[2]/div[2]"))
-                    )
-                except Exception:
-                    story_textarea = WebDriverWait(driver, 20).until(
-                        EC.presence_of_element_located((By.XPATH, "/html/body/div[1]/div[3]/div/section/div/div[2]/div[2]/div[2]/div[2]"))
-                    )
-
-            story_textarea.clear()
-            story_text = short_plot
-
-            # Teile den Text in kleinere Abschnitte auf
-            chunk_size = 1000
-            for i in range(0, len(story_text), chunk_size):
-                story_textarea.send_keys(story_text[i:i + chunk_size])
-                time.sleep(1)  # Kurze Pause zwischen den Eingaben, um die Seite nicht zu überlasten
-
-            #Back Button
-            back_button = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//span[@class='button__label' and text()='Back']"))
-            )
-            back_button.click()
-            # Scroll to the top of the page
-            driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(2)
-            #Bild hochladen
-            try:
-                # Zuerst mit CSS-Selektor versuchen
-                button = driver.find_element(By.CSS_SELECTOR, ".edit-image-button__button.edit-image-button__button--edit.text-light")
-            except:
-                try:
-                    # Falls der CSS-Selektor nicht funktioniert, mit XPath versuchen
-                    button = driver.find_element(By.XPATH, "/html/body/div/div[3]/div/section/section/div[1]/header/div[2]/button")
-                except Exception as e:
-                    print(f"Element konnte nicht gefunden werden: {e}")
-            time.sleep(2)
-            try:
-                button.click()
-            except Exception as e:
-                print(f"Element konnte nicht angeklickt werden: {e}")
-
-
-            click_upload_tab(driver)
-
-
-            file_path = bild
-
-                    # Upload versuchen
-            if upload_image(driver, file_path):
-                pass
+            # Playwright Setup
+            user_input = input("Soll der Browser in Zeitlupe ausgeführt werden? (yes/no) [no]: ").strip().lower()
+            if user_input == "yes":
+                slow_mo_value = 500
             else:
-                print("Datei-Upload ist fehlgeschlagen.")
+                slow_mo_value = None
 
-            click_done_button(driver)
+            browser = None
+            try:
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=False, slow_mo=slow_mo_value)
+                    context = browser.new_context()
+                    page = context.new_page()
+                    
+                    # Navigate to StoryOne
+                    page.goto("https://www.story.one/en/")
+                    page.set_viewport_size({"width": 1920, "height": 1080})
 
-            time.sleep(20)
-            click_detailsbox_button(driver)
+                    # Login
+                    page.click("text=Login/Signup")
+                    page.fill("input[name='login-email']", os.getenv("EMAIL"))
+                    page.fill("input[name='login-password']", os.getenv("PASSWORD"))
+                    page.click("text=Login")
+                    page.wait_for_load_state("networkidle")
 
-            click_add_genre_button(driver)
-            time.sleep(3)
-            click_novels_and_stories_span(driver)
-            time.sleep(3)
-            click_save_button(driver)
-            time.sleep(10)
-            click_share_on_storyone_button(driver)
+                    # Handle cookies if present
+                    try:
+                        page.click("button:has-text('Accept')", timeout=5000)
+                    except:
+                        pass
 
-            # Warte 50 Sekunden, bevor der Browser geschlossen wird
-            time.sleep(10)
-            driver.quit()
+                    # Click on draft
+                    page.click("text=Draft")
+                    page.wait_for_load_state("networkidle")
+
+                    # Select story type
+                    try:
+                        page.click("text=Stories")
+                    except:
+                        page.click("span:has-text('Stories')")
+                    page.wait_for_load_state("networkidle")
+
+                    # Click write story
+                    try:
+                        page.click("text=Write Story")
+                    except:
+                        page.click("a:has-text('Write Story')")
+                    page.wait_for_load_state("networkidle")
+
+                    # Fill in title
+                    page.fill("textarea[name='Title']", chapter_title)
+
+                    # Click to write story
+                    page.click("button:has-text('Write')")
+                    page.wait_for_load_state("networkidle")
+
+                    # Fill in story content
+                    page.fill("div[contenteditable='true']", short_plot)
+                    page.keyboard.press("Control+A")
+                    page.keyboard.press("Control+C")
+                    page.keyboard.press("Control+V")
+
+                    # Go back
+                    page.click("text=Back")
+                    page.wait_for_load_state("networkidle")
+
+                    # Upload image
+                    page.click("button.edit-image-button__button")
+                    page.click("text=Upload")
+                    
+                    # Test-Bild erstellen
+                    temp_file_path = "/tmp/test_image.jpg"
+                    with Image.new('RGB', (100, 100), color='red') as img:
+                        img.save(temp_file_path)
+                    
+                    # Upload the image
+                    page.set_input_files("input[type='file']", temp_file_path)
+                    page.click("text=Done")
+                    page.wait_for_load_state("networkidle")
+
+                    # Add genre
+                    page.click("button:has-text('Add Genre')")
+                    page.click("text=Novels and Stories")
+                    page.click("button:has-text('Save')")
+                    page.wait_for_load_state("networkidle")
+
+                    # Share on StoryOne
+                    page.click("button:has-text('Share on StoryOne')")
+                    page.wait_for_load_state("networkidle")
+
+                    # Wait before closing
+                    time.sleep(10)
+                    print("Browser wird geschlossen...")
+                    browser.close()
+            except Exception as e:
+                print(f"Fehler: {e}")
+                if browser:
+                    print("Browser wird geschlossen...")
+                    browser.close()
+
         except Exception as e:
             print(f"Fehler: {e}")
             time.sleep(60)
