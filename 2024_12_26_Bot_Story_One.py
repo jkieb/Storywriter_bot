@@ -16,7 +16,6 @@ load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=openai_key) if openai_key else None
 
-
 def fetch_random_wikipedia_summary():
     """Fetch a random article summary from German Wikipedia."""
     try:
@@ -40,8 +39,6 @@ def download_image(url: str, path: str) -> None:
             f.write(resp.content)
     except Exception as exc:
         raise RuntimeError(f"Bild konnte nicht heruntergeladen werden: {exc}")
-
-
 
 # def generate_random_keywords(n=50):
 #     """
