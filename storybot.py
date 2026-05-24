@@ -178,7 +178,7 @@ Bild:     {image_path or 'nicht generiert'}
 # ── Playwright – StoryOne befüllen (OHNE Veröffentlichen) ─────────────────────
 
 def upload_to_storyone(title: str, story: str, image_path: str) -> None:
-    """Öffnet StoryOne, loggt ein, füllt Titel + Geschichte + Bild aus.
+    """Öffnet StoryOne (neue Struktur 2025), loggt ein, füllt alles aus.
     Stoppt VOR dem Klick auf 'Share on StoryOne'."""
 
     print("🌐 Starte Playwright ...")
@@ -191,86 +191,107 @@ def upload_to_storyone(title: str, story: str, image_path: str) -> None:
 
         try:
             # ── Login ──────────────────────────────────────────────────────────
-            page.goto("https://www.story.one/en/")
-            page.wait_for_load_state("networkidle")
-
-            # Cookie-Banner wegklicken falls vorhanden
-            try:
-                page.click("button:has-text('Accept')", timeout=4000)
-            except Exception:
-                pass
-
-            page.click("text=Login/Signup")
-            page.fill("input[name='login-email']", EMAIL)
-            page.fill("input[name='login-password']", PASSWORD)
-            page.click("text=Login")
+            # Neue URL öffnet direkt das Login-Modal
+            page.goto("https://www.story.one/en/start-writing/?type=story#/")
             page.wait_for_load_state("networkidle")
             time.sleep(2)
 
-            # ── Zu "Write Story" navigieren ────────────────────────────────────
+            # Cookie-Banner wegklicken
             try:
-                page.click("text=Draft")
-                page.wait_for_load_state("networkidle")
+                page.click("button:has-text('Accept all')", timeout=5000)
+                time.sleep(1)
             except Exception:
                 pass
 
-            try:
-                page.click("text=Stories")
-            except Exception:
-                page.click("span:has-text('Stories')")
+            # Login-Formular ausfüllen
+            page.wait_for_selector("input[placeholder='E-mail']", timeout=15000)
+            page.fill("input[placeholder='E-mail']", EMAIL)
+            page.fill("input[type='password']", PASSWORD)
+            page.click("button:has-text('Sign In')")
             page.wait_for_load_state("networkidle")
+            time.sleep(3)
 
+            # Newsletter-Popup schließen falls vorhanden
             try:
-                page.click("text=Write Story")
+                page.click("button.modal__close-button", timeout=4000)
+                time.sleep(1)
             except Exception:
-                page.click("a:has-text('Write Story')")
-            page.wait_for_load_state("networkidle")
+                pass
 
             # ── Titel eintragen ────────────────────────────────────────────────
-            page.fill("textarea[name='Title']", title)
-
-            # ── Geschichte eintragen ───────────────────────────────────────────
-            page.click("button:has-text('Write')")
-            page.wait_for_load_state("networkidle")
-            editor = page.locator("div[contenteditable='true']").first
-            editor.click()
-            editor.fill(story)
+            # Titel max. 45 Zeichen (Limit der neuen Website)
+            title_short = title[:45]
+            page.wait_for_selector("textarea[placeholder='Chapter Title']", timeout=15000)
+            page.fill("textarea[placeholder='Chapter Title']", title_short)
             time.sleep(1)
 
-            # ── Zurück zur Story-Übersicht ──────────────────────────────────────
-            page.click("text=Back")
-            page.wait_for_load_state("networkidle")
-            time.sleep(1)
-
-            # ── Bild hochladen ─────────────────────────────────────────────────
+            # ── Bild hochladen (Preview Image) ────────────────────────────────
             if image_path and os.path.exists(image_path):
                 try:
-                    page.click("button.edit-image-button__button")
-                    page.click("text=Upload")
-                    page.set_input_files("input[type='file']", image_path)
-                    page.click("text=Done")
-                    page.wait_for_load_state("networkidle")
-                    time.sleep(1)
+                    with page.expect_file_chooser(timeout=8000) as fc:
+                        page.click("button.edit-image-button__button--upload")
+                    fc.value.set_files(image_path)
+                    time.sleep(3)
+                    print("✅ Bild hochgeladen.")
                 except Exception as exc:
-                    print(f"Bild-Upload Fehler: {exc}")
+                    print(f"⚠️  Bild-Upload Fehler: {exc}")
 
-            # ── Genre setzen ───────────────────────────────────────────────────
+            # ── Text-Editor öffnen via "+" bei "Chapter Text" ─────────────────
+            chapter_text_plus = page.locator(
+                "div.detailsbox"
+            ).filter(has_text="Chapter Text").locator("button.detailsbox__absolute-btn")
             try:
-                page.click("button:has-text('Add Genre')")
-                page.click("text=Novels and Stories")
-                page.click("button:has-text('Save')")
-                page.wait_for_load_state("networkidle")
-            except Exception as exc:
-                print(f"Genre-Fehler: {exc}")
+                chapter_text_plus.click(timeout=8000)
+            except Exception:
+                # Fallback: direkt den letzten "+" Button klicken
+                page.locator("button.detailsbox__absolute-btn").last.click()
+            page.wait_for_url("**#/editor**", timeout=10000)
+            time.sleep(2)
+
+            # ── Text in Quill-Editor einfügen ─────────────────────────────────
+            # Quill Editor: div.ql-editor (max. ~3500 Zeichen)
+            story_short = story[:3400]
+            editor = page.locator("div.ql-editor").first
+            editor.click()
+            time.sleep(0.5)
+            # Text via JavaScript einfügen (zuverlässiger als type() bei Quill)
+            page.evaluate(
+                """(text) => {
+                    const editor = document.querySelector('.ql-editor');
+                    editor.innerHTML = '';
+                    const lines = text.split('\\n');
+                    lines.forEach(line => {
+                        const p = document.createElement('p');
+                        p.textContent = line;
+                        editor.appendChild(p);
+                    });
+                    editor.dispatchEvent(new Event('input', { bubbles: true }));
+                }""",
+                story_short
+            )
+            time.sleep(1)
+
+            # ── "Done" klicken → zurück zur Chapter-Übersicht ─────────────────
+            page.click("button:has-text('Done')")
+            page.wait_for_url("**start-writing**", timeout=10000)
+            time.sleep(2)
 
             # ── STOPP – NICHT veröffentlichen ──────────────────────────────────
-            print("✅ Geschichte fertig vorbereitet!")
-            print("⏸️  Bot stoppt hier – du kannst jetzt selbst auf 'Share on StoryOne' klicken.")
-            print("   Browser bleibt 5 Minuten offen ...")
-            time.sleep(300)  # 5 Minuten warten, damit du den Publish-Button siehst
+            # "Save privately" speichert als Entwurf
+            page.click("button:has-text('Save privately')")
+            time.sleep(2)
+
+            print("\n" + "=" * 60)
+            print("✅ Geschichte als Entwurf gespeichert!")
+            print("⏸️  Browser bleibt 5 Minuten offen.")
+            print("   Klicke selbst auf 'Share on StoryOne' zum Veröffentlichen.")
+            print("=" * 60)
+            time.sleep(300)
 
         except Exception as exc:
-            print(f"Playwright-Fehler: {exc}")
+            print(f"❌ Playwright-Fehler: {exc}")
+            import traceback
+            traceback.print_exc()
             time.sleep(30)
         finally:
             browser.close()
