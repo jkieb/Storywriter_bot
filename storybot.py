@@ -190,28 +190,58 @@ def upload_to_storyone(title: str, story: str, image_path: str) -> None:
         page.set_viewport_size({"width": 1920, "height": 1080})
 
         try:
-            # ── Login ──────────────────────────────────────────────────────────
-            # Neue URL öffnet direkt das Login-Modal
-            page.goto("https://www.story.one/en/start-writing/?type=story#/")
+            # ── Schritt 1: Homepage laden und alle Popups wegräumen ────────────
+            page.goto("https://www.story.one/en/")
             page.wait_for_load_state("networkidle")
             time.sleep(2)
 
-            # Cookie-Banner wegklicken
+            # Cookie-Banner wegklicken (erscheint als erstes)
             try:
-                page.click("button:has-text('Accept all')", timeout=5000)
+                page.click("button:has-text('Accept all')", timeout=6000)
+                print("🍪 Cookie-Banner geschlossen.")
+                time.sleep(1)
+            except Exception:
+                try:
+                    page.click("button:has-text('Disable all but essentials')", timeout=3000)
+                    time.sleep(1)
+                except Exception:
+                    pass
+
+            # Newsletter-Popup schließen falls vorhanden
+            try:
+                page.click("button.modal__close-button", timeout=4000)
+                print("📧 Newsletter-Popup geschlossen.")
                 time.sleep(1)
             except Exception:
                 pass
 
-            # Login-Formular ausfüllen
-            page.wait_for_selector("input[placeholder='E-mail']", timeout=15000)
+            # ── Schritt 2: Login-Seite aufrufen ───────────────────────────────
+            page.goto("https://www.story.one/en/start-writing/?type=story#/")
+            page.wait_for_load_state("networkidle")
+            time.sleep(2)
+
+            # Nochmal Popups schließen falls wieder erschienen
+            try:
+                page.click("button:has-text('Accept all')", timeout=3000)
+                time.sleep(1)
+            except Exception:
+                pass
+            try:
+                page.click("button.modal__close-button", timeout=3000)
+                time.sleep(1)
+            except Exception:
+                pass
+
+            # ── Schritt 3: Login-Formular ausfüllen ───────────────────────────
+            page.wait_for_selector("input[placeholder='E-mail']", timeout=20000)
             page.fill("input[placeholder='E-mail']", EMAIL)
             page.fill("input[type='password']", PASSWORD)
             page.click("button:has-text('Sign In')")
             page.wait_for_load_state("networkidle")
             time.sleep(3)
+            print("🔐 Eingeloggt.")
 
-            # Newsletter-Popup schließen falls vorhanden
+            # Nochmal Newsletter-Popup nach Login schließen
             try:
                 page.click("button.modal__close-button", timeout=4000)
                 time.sleep(1)
