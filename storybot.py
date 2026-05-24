@@ -189,64 +189,78 @@ def upload_to_storyone(title: str, story: str, image_path: str) -> None:
         page = context.new_page()
         page.set_viewport_size({"width": 1920, "height": 1080})
 
+        def dismiss_all_popups(pg, wait=1):
+            """Schließt Cookie-Banner und Newsletter-Popups aggressiv."""
+            # Escape-Taste (schließt die meisten Modals)
+            try:
+                pg.keyboard.press("Escape")
+                time.sleep(0.3)
+            except Exception:
+                pass
+            # Cookie-Banner
+            try:
+                pg.click("button:has-text('Accept all')", timeout=2000)
+                time.sleep(0.3)
+            except Exception:
+                pass
+            # Alle sichtbaren Close-Buttons klicken
+            try:
+                for btn in pg.locator("button.modal__close-button").all():
+                    try:
+                        btn.click(timeout=1000)
+                        time.sleep(0.3)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            time.sleep(wait)
+
         try:
-            # ── Schritt 1: Homepage laden und alle Popups wegräumen ────────────
+            # ── Schritt 1: Homepage laden ──────────────────────────────────────
             page.goto("https://www.story.one/en/")
-            page.wait_for_load_state("networkidle")
-            time.sleep(2)
+            page.wait_for_load_state("domcontentloaded")
+            time.sleep(1)
+            dismiss_all_popups(page, wait=1)
 
-            # Cookie-Banner wegklicken (erscheint als erstes)
-            try:
-                page.click("button:has-text('Accept all')", timeout=6000)
-                print("🍪 Cookie-Banner geschlossen.")
-                time.sleep(1)
-            except Exception:
-                try:
-                    page.click("button:has-text('Disable all but essentials')", timeout=3000)
-                    time.sleep(1)
-                except Exception:
-                    pass
-
-            # Newsletter-Popup schließen falls vorhanden
-            try:
-                page.click("button.modal__close-button", timeout=4000)
-                print("📧 Newsletter-Popup geschlossen.")
-                time.sleep(1)
-            except Exception:
-                pass
-
-            # ── Schritt 2: Login-Seite aufrufen ───────────────────────────────
+            # ── Schritt 2: Direkt zur Login-URL navigieren ─────────────────────
             page.goto("https://www.story.one/en/start-writing/?type=story#/")
-            page.wait_for_load_state("networkidle")
+            page.wait_for_load_state("domcontentloaded")
             time.sleep(2)
+            dismiss_all_popups(page, wait=1)
 
-            # Nochmal Popups schließen falls wieder erschienen
-            try:
-                page.click("button:has-text('Accept all')", timeout=3000)
-                time.sleep(1)
-            except Exception:
-                pass
-            try:
-                page.click("button.modal__close-button", timeout=3000)
-                time.sleep(1)
-            except Exception:
-                pass
+            # ── Schritt 3: Login-Modal abwarten und füllen ────────────────────
+            # Wartet bis Login-Feld sichtbar ist (auch hinter Overlay)
+            print("⏳ Warte auf Login-Formular ...")
+            page.wait_for_selector("input[placeholder='E-mail']",
+                                   state="attached", timeout=30000)
 
-            # ── Schritt 3: Login-Formular ausfüllen ───────────────────────────
-            page.wait_for_selector("input[placeholder='E-mail']", timeout=20000)
-            page.fill("input[placeholder='E-mail']", EMAIL)
-            page.fill("input[type='password']", PASSWORD)
+            # Nochmal alle Popups wegräumen die das Formular blockieren könnten
+            dismiss_all_popups(page, wait=1)
+
+            # Direkt per JavaScript ausfüllen (robust gegen React-Felder)
+            page.evaluate("""([email, password]) => {
+                const setVal = (el, val) => {
+                    const setter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value').set;
+                    setter.call(el, val);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                };
+                const emailEl = document.querySelector("input[placeholder='E-mail']");
+                const passEl  = document.querySelector("input[type='password']");
+                if (emailEl) setVal(emailEl, email);
+                if (passEl)  setVal(passEl,  password);
+            }""", [EMAIL, PASSWORD])
+            time.sleep(0.5)
+
+            # Sign-In klicken
             page.click("button:has-text('Sign In')")
             page.wait_for_load_state("networkidle")
             time.sleep(3)
             print("🔐 Eingeloggt.")
 
-            # Nochmal Newsletter-Popup nach Login schließen
-            try:
-                page.click("button.modal__close-button", timeout=4000)
-                time.sleep(1)
-            except Exception:
-                pass
+            # Nach Login Newsletter-Popup schließen
+            dismiss_all_popups(page, wait=1)
 
             # ── Titel eintragen ────────────────────────────────────────────────
             # Titel max. 45 Zeichen (Limit der neuen Website)
