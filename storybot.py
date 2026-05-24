@@ -177,154 +177,183 @@ Bild:     {image_path or 'nicht generiert'}
 
 # ── Playwright – StoryOne befüllen (OHNE Veröffentlichen) ─────────────────────
 
+AUTH_FILE = STORIES_DIR / "session.json"   # gespeicherte Login-Session
+
+
+def _do_login(page) -> bool:
+    """Führt Login durch. Gibt True zurück wenn erfolgreich."""
+    try:
+        page.wait_for_selector("input[placeholder='E-mail']",
+                               state="visible", timeout=15000)
+        page.fill("input[placeholder='E-mail']", EMAIL)
+        page.fill("input[type='password']", PASSWORD)
+        page.click("button:has-text('Sign In')")
+        page.wait_for_load_state("networkidle")
+        time.sleep(2)
+        # Prüfen ob Login erfolgreich (kein Login-Formular mehr)
+        if page.locator("input[placeholder='E-mail']").count() == 0:
+            print("🔐 Login erfolgreich.")
+            return True
+        print("❌ Login fehlgeschlagen – falsche Zugangsdaten?")
+        return False
+    except Exception as e:
+        print(f"Login-Fehler: {e}")
+        return False
+
+
+def _fill_chapter(page, title: str, story: str, image_path: str):
+    """Befüllt das Create-Chapter Formular."""
+
+    # ── Titel ────────────────────────────────────────────────────────────────
+    page.wait_for_selector("textarea[placeholder='Chapter Title']", timeout=15000)
+    page.fill("textarea[placeholder='Chapter Title']", title[:45])
+    time.sleep(0.5)
+    print(f"✏️  Titel eingetragen: {title[:45]}")
+
+    # ── Bild ─────────────────────────────────────────────────────────────────
+    if image_path and os.path.exists(image_path):
+        try:
+            with page.expect_file_chooser(timeout=6000) as fc:
+                page.click("button.edit-image-button__button--upload")
+            fc.value.set_files(image_path)
+            time.sleep(3)
+            print("🖼️  Bild hochgeladen.")
+        except Exception as exc:
+            print(f"⚠️  Bild-Upload übersprungen: {exc}")
+
+    # ── Text-Editor öffnen ───────────────────────────────────────────────────
+    try:
+        page.locator("div.detailsbox").filter(
+            has_text="Chapter Text"
+        ).locator("button.detailsbox__absolute-btn").click(timeout=6000)
+    except Exception:
+        page.locator("button.detailsbox__absolute-btn").last.click()
+
+    page.wait_for_url("**#/editor**", timeout=12000)
+    time.sleep(2)
+
+    # ── Text in Quill einfügen ───────────────────────────────────────────────
+    page.evaluate("""(text) => {
+        const ed = document.querySelector('.ql-editor');
+        if (!ed) return;
+        ed.innerHTML = '';
+        text.split('\\n').forEach(line => {
+            const p = document.createElement('p');
+            p.textContent = line;
+            ed.appendChild(p);
+        });
+        ed.dispatchEvent(new Event('input', { bubbles: true }));
+    }""", story[:3400])
+    time.sleep(1)
+    print("📝 Text eingetragen.")
+
+    # ── Done → zurück ────────────────────────────────────────────────────────
+    page.click("button:has-text('Done')")
+    page.wait_for_url("**start-writing**", timeout=12000)
+    time.sleep(2)
+
+    # ── Als Entwurf speichern (KEIN Publish) ─────────────────────────────────
+    page.click("button:has-text('Save privately')")
+    time.sleep(2)
+    print("💾 Als Entwurf gespeichert.")
+
+
 def upload_to_storyone(title: str, story: str, image_path: str) -> None:
-    """Öffnet StoryOne (neue Struktur 2025), loggt ein, füllt alles aus.
-    Stoppt VOR dem Klick auf 'Share on StoryOne'."""
+    """Selbstheilender Upload-Loop mit persistenter Session."""
 
     print("🌐 Starte Playwright ...")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, slow_mo=SLOWMO)
-        context = browser.new_context()
-        page = context.new_page()
-        page.set_viewport_size({"width": 1920, "height": 1080})
 
-        # ── Popup-Killer: wird VOR dem Laden der Seite injiziert ───────────────
-        # Setzt localStorage-Flags und beobachtet den DOM automatisch
-        page.add_init_script("""
-            // Newsletter-Popup via localStorage unterdrücken
-            try {
-                localStorage.setItem('newsletter_closed', '1');
-                localStorage.setItem('newsletter_shown', '1');
-                localStorage.setItem('popupShown', '1');
-                localStorage.setItem('subscribePopupShown', '1');
-                localStorage.setItem('newsletterDismissed', '1');
-            } catch(e) {}
-
-            // MutationObserver: schließt automatisch jeden Popup
-            // der KEIN Login-Formular enthält
-            const killer = new MutationObserver(() => {
-                // Cookie-Banner
-                document.querySelectorAll(
-                    'button.button--style--primary'
-                ).forEach(btn => {
-                    if (btn.textContent.includes('Accept')) btn.click();
-                });
-                // Alle Close-Buttons von Nicht-Login-Modals
-                document.querySelectorAll('button.modal__close-button').forEach(btn => {
-                    try {
-                        const modal = btn.closest('[class*="modal"]')
-                                   || btn.closest('[class*="overlay"]')
-                                   || btn.parentElement;
-                        const isLogin = modal &&
-                            (modal.querySelector('input[placeholder="E-mail"]') ||
-                             modal.querySelector('input[type="email"]'));
-                        if (!isLogin) btn.click();
-                    } catch(e) {}
-                });
-            });
-            killer.observe(document.documentElement,
-                           { childList: true, subtree: true });
-        """)
-
-        try:
-            # ── Navigation zur Login-Seite ─────────────────────────────────────
-            print("⏳ Lade StoryOne ...")
-            page.goto("https://www.story.one/en/start-writing/?type=story#/")
-            page.wait_for_load_state("networkidle")
-            time.sleep(3)
-
-            # ── Login-Formular ausfüllen ───────────────────────────────────────
-            print("⏳ Warte auf Login-Formular ...")
-            page.wait_for_selector("input[placeholder='E-mail']",
-                                   state="visible", timeout=30000)
-            print("✅ Login-Formular sichtbar.")
-
-            page.fill("input[placeholder='E-mail']", EMAIL)
-            page.fill("input[type='password']", PASSWORD)
-            page.click("button:has-text('Sign In')")
-            page.wait_for_load_state("networkidle")
-            time.sleep(3)
-            print("🔐 Eingeloggt.")
-
-            # ── Titel eintragen ────────────────────────────────────────────────
-            # Titel max. 45 Zeichen (Limit der neuen Website)
-            title_short = title[:45]
-            page.wait_for_selector("textarea[placeholder='Chapter Title']", timeout=15000)
-            page.fill("textarea[placeholder='Chapter Title']", title_short)
-            time.sleep(1)
-
-            # ── Bild hochladen (Preview Image) ────────────────────────────────
-            if image_path and os.path.exists(image_path):
-                try:
-                    with page.expect_file_chooser(timeout=8000) as fc:
-                        page.click("button.edit-image-button__button--upload")
-                    fc.value.set_files(image_path)
-                    time.sleep(3)
-                    print("✅ Bild hochgeladen.")
-                except Exception as exc:
-                    print(f"⚠️  Bild-Upload Fehler: {exc}")
-
-            # ── Text-Editor öffnen via "+" bei "Chapter Text" ─────────────────
-            chapter_text_plus = page.locator(
-                "div.detailsbox"
-            ).filter(has_text="Chapter Text").locator("button.detailsbox__absolute-btn")
+        for attempt in range(1, 4):          # bis zu 3 Versuche
+            print(f"\n{'='*50}\n🔄 Versuch {attempt}/3\n{'='*50}")
+            context = None
             try:
-                chapter_text_plus.click(timeout=8000)
-            except Exception:
-                # Fallback: direkt den letzten "+" Button klicken
-                page.locator("button.detailsbox__absolute-btn").last.click()
-            page.wait_for_url("**#/editor**", timeout=10000)
-            time.sleep(2)
+                # ── Session laden oder neu erstellen ──────────────────────────
+                if AUTH_FILE.exists() and attempt == 1:
+                    context = browser.new_context(storage_state=str(AUTH_FILE))
+                    print("✅ Gespeicherte Session geladen – kein Login nötig.")
+                else:
+                    context = browser.new_context()
 
-            # ── Text in Quill-Editor einfügen ─────────────────────────────────
-            # Quill Editor: div.ql-editor (max. ~3500 Zeichen)
-            story_short = story[:3400]
-            editor = page.locator("div.ql-editor").first
-            editor.click()
-            time.sleep(0.5)
-            # Text via JavaScript einfügen (zuverlässiger als type() bei Quill)
-            page.evaluate(
-                """(text) => {
-                    const editor = document.querySelector('.ql-editor');
-                    editor.innerHTML = '';
-                    const lines = text.split('\\n');
-                    lines.forEach(line => {
-                        const p = document.createElement('p');
-                        p.textContent = line;
-                        editor.appendChild(p);
+                page = context.new_page()
+                page.set_viewport_size({"width": 1920, "height": 1080})
+
+                # ── Popup-Killer per init_script ──────────────────────────────
+                page.add_init_script("""
+                    const kill = new MutationObserver(() => {
+                        // Cookie-Banner
+                        document.querySelectorAll('button').forEach(b => {
+                            if (b.textContent.trim() === 'Accept all') b.click();
+                        });
+                        // Alle Modals schließen die KEIN Login-Input haben
+                        document.querySelectorAll('button.modal__close-button').forEach(b => {
+                            const m = b.closest('[class*="modal"]') || b.parentElement;
+                            if (m && !m.querySelector('input[placeholder="E-mail"]'))
+                                b.click();
+                        });
                     });
-                    editor.dispatchEvent(new Event('input', { bubbles: true }));
-                }""",
-                story_short
-            )
-            time.sleep(1)
+                    kill.observe(document.documentElement,
+                                 {childList:true, subtree:true});
+                """)
 
-            # ── "Done" klicken → zurück zur Chapter-Übersicht ─────────────────
-            page.click("button:has-text('Done')")
-            page.wait_for_url("**start-writing**", timeout=10000)
-            time.sleep(2)
+                # ── Zur Create-Chapter Seite ──────────────────────────────────
+                page.goto("https://www.story.one/en/start-writing/?type=story#/")
+                page.wait_for_load_state("networkidle")
+                time.sleep(3)
 
-            # ── STOPP – NICHT veröffentlichen ──────────────────────────────────
-            # "Save privately" speichert als Entwurf
-            page.click("button:has-text('Save privately')")
-            time.sleep(2)
+                # ── Login nötig? ──────────────────────────────────────────────
+                if page.locator("input[placeholder='E-mail']").count() > 0:
+                    print("🔑 Login erforderlich ...")
+                    if AUTH_FILE.exists():
+                        AUTH_FILE.unlink()      # abgelaufene Session löschen
+                    if not _do_login(page):
+                        raise Exception("Login fehlgeschlagen")
+                    # Session für nächste Läufe speichern
+                    context.storage_state(path=str(AUTH_FILE))
+                    print(f"💾 Session gespeichert → {AUTH_FILE}")
+                    page.goto("https://www.story.one/en/start-writing/?type=story#/")
+                    page.wait_for_load_state("networkidle")
+                    time.sleep(3)
 
-            print("\n" + "=" * 60)
-            print("✅ Geschichte als Entwurf gespeichert!")
-            print("⏸️  Browser bleibt 5 Minuten offen.")
-            print("   Klicke selbst auf 'Share on StoryOne' zum Veröffentlichen.")
-            print("=" * 60)
-            time.sleep(300)
+                # ── Formular ausfüllen ────────────────────────────────────────
+                _fill_chapter(page, title, story, image_path)
 
-        except Exception as exc:
-            print(f"❌ Playwright-Fehler: {exc}")
-            import traceback
-            traceback.print_exc()
-            time.sleep(30)
-        finally:
-            browser.close()
-            print("🔒 Browser geschlossen.")
+                print("\n" + "=" * 60)
+                print("✅ Geschichte als Entwurf bereit!")
+                print("⏸️  Browser bleibt 5 Minuten offen.")
+                print("   → Klicke auf 'Share on StoryOne' zum Veröffentlichen.")
+                print("=" * 60)
+                time.sleep(300)
+                break  # Erfolg – Loop beenden
+
+            except Exception as exc:
+                print(f"\n❌ Fehler in Versuch {attempt}: {exc}")
+                # Screenshot zur Diagnose speichern
+                try:
+                    ss = STORIES_DIR / f"error_attempt{attempt}.png"
+                    page.screenshot(path=str(ss))
+                    print(f"📸 Screenshot gespeichert: {ss}")
+                except Exception:
+                    pass
+                # Session löschen damit nächster Versuch frisch startet
+                if AUTH_FILE.exists():
+                    AUTH_FILE.unlink()
+                if attempt == 3:
+                    print("❌ Alle 3 Versuche fehlgeschlagen.")
+                else:
+                    print(f"⏳ Warte 5s, dann Versuch {attempt+1} ...")
+                    time.sleep(5)
+            finally:
+                if context:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+
+        browser.close()
+        print("🔒 Browser geschlossen.")
 
 
 # ── Hauptprogramm ──────────────────────────────────────────────────────────────
