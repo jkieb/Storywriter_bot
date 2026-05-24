@@ -189,78 +189,63 @@ def upload_to_storyone(title: str, story: str, image_path: str) -> None:
         page = context.new_page()
         page.set_viewport_size({"width": 1920, "height": 1080})
 
-        def dismiss_all_popups(pg, wait=1):
-            """Schließt Cookie-Banner und Newsletter-Popups aggressiv."""
-            # Escape-Taste (schließt die meisten Modals)
-            try:
-                pg.keyboard.press("Escape")
-                time.sleep(0.3)
-            except Exception:
-                pass
-            # Cookie-Banner
-            try:
-                pg.click("button:has-text('Accept all')", timeout=2000)
-                time.sleep(0.3)
-            except Exception:
-                pass
-            # Alle sichtbaren Close-Buttons klicken
-            try:
-                for btn in pg.locator("button.modal__close-button").all():
-                    try:
-                        btn.click(timeout=1000)
-                        time.sleep(0.3)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            time.sleep(wait)
+        # ── Popup-Killer: wird VOR dem Laden der Seite injiziert ───────────────
+        # Setzt localStorage-Flags und beobachtet den DOM automatisch
+        page.add_init_script("""
+            // Newsletter-Popup via localStorage unterdrücken
+            try {
+                localStorage.setItem('newsletter_closed', '1');
+                localStorage.setItem('newsletter_shown', '1');
+                localStorage.setItem('popupShown', '1');
+                localStorage.setItem('subscribePopupShown', '1');
+                localStorage.setItem('newsletterDismissed', '1');
+            } catch(e) {}
+
+            // MutationObserver: schließt automatisch jeden Popup
+            // der KEIN Login-Formular enthält
+            const killer = new MutationObserver(() => {
+                // Cookie-Banner
+                document.querySelectorAll(
+                    'button.button--style--primary'
+                ).forEach(btn => {
+                    if (btn.textContent.includes('Accept')) btn.click();
+                });
+                // Alle Close-Buttons von Nicht-Login-Modals
+                document.querySelectorAll('button.modal__close-button').forEach(btn => {
+                    try {
+                        const modal = btn.closest('[class*="modal"]')
+                                   || btn.closest('[class*="overlay"]')
+                                   || btn.parentElement;
+                        const isLogin = modal &&
+                            (modal.querySelector('input[placeholder="E-mail"]') ||
+                             modal.querySelector('input[type="email"]'));
+                        if (!isLogin) btn.click();
+                    } catch(e) {}
+                });
+            });
+            killer.observe(document.documentElement,
+                           { childList: true, subtree: true });
+        """)
 
         try:
-            # ── Schritt 1: Homepage laden ──────────────────────────────────────
-            page.goto("https://www.story.one/en/")
-            page.wait_for_load_state("domcontentloaded")
-            time.sleep(1)
-            dismiss_all_popups(page, wait=1)
-
-            # ── Schritt 2: Direkt zur Login-URL navigieren ─────────────────────
+            # ── Navigation zur Login-Seite ─────────────────────────────────────
+            print("⏳ Lade StoryOne ...")
             page.goto("https://www.story.one/en/start-writing/?type=story#/")
-            page.wait_for_load_state("domcontentloaded")
-            time.sleep(2)
-            dismiss_all_popups(page, wait=1)
+            page.wait_for_load_state("networkidle")
+            time.sleep(3)
 
-            # ── Schritt 3: Login-Modal abwarten und füllen ────────────────────
-            # Wartet bis Login-Feld sichtbar ist (auch hinter Overlay)
+            # ── Login-Formular ausfüllen ───────────────────────────────────────
             print("⏳ Warte auf Login-Formular ...")
             page.wait_for_selector("input[placeholder='E-mail']",
-                                   state="attached", timeout=30000)
+                                   state="visible", timeout=30000)
+            print("✅ Login-Formular sichtbar.")
 
-            # Nochmal alle Popups wegräumen die das Formular blockieren könnten
-            dismiss_all_popups(page, wait=1)
-
-            # Direkt per JavaScript ausfüllen (robust gegen React-Felder)
-            page.evaluate("""([email, password]) => {
-                const setVal = (el, val) => {
-                    const setter = Object.getOwnPropertyDescriptor(
-                        window.HTMLInputElement.prototype, 'value').set;
-                    setter.call(el, val);
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                };
-                const emailEl = document.querySelector("input[placeholder='E-mail']");
-                const passEl  = document.querySelector("input[type='password']");
-                if (emailEl) setVal(emailEl, email);
-                if (passEl)  setVal(passEl,  password);
-            }""", [EMAIL, PASSWORD])
-            time.sleep(0.5)
-
-            # Sign-In klicken
+            page.fill("input[placeholder='E-mail']", EMAIL)
+            page.fill("input[type='password']", PASSWORD)
             page.click("button:has-text('Sign In')")
             page.wait_for_load_state("networkidle")
             time.sleep(3)
             print("🔐 Eingeloggt.")
-
-            # Nach Login Newsletter-Popup schließen
-            dismiss_all_popups(page, wait=1)
 
             # ── Titel eintragen ────────────────────────────────────────────────
             # Titel max. 45 Zeichen (Limit der neuen Website)
