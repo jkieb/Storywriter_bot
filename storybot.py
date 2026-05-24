@@ -180,27 +180,6 @@ Bild:     {image_path or 'nicht generiert'}
 AUTH_FILE = STORIES_DIR / "session.json"   # gespeicherte Login-Session
 
 
-def _do_login(page) -> bool:
-    """Führt Login durch. Gibt True zurück wenn erfolgreich."""
-    try:
-        page.wait_for_selector("input[placeholder='E-mail']",
-                               state="visible", timeout=15000)
-        page.fill("input[placeholder='E-mail']", EMAIL)
-        page.fill("input[type='password']", PASSWORD)
-        page.click("button:has-text('Sign In')")
-        page.wait_for_load_state("networkidle")
-        time.sleep(2)
-        # Prüfen ob Login erfolgreich (kein Login-Formular mehr)
-        if page.locator("input[placeholder='E-mail']").count() == 0:
-            print("🔐 Login erfolgreich.")
-            return True
-        print("❌ Login fehlgeschlagen – falsche Zugangsdaten?")
-        return False
-    except Exception as e:
-        print(f"Login-Fehler: {e}")
-        return False
-
-
 def _fill_chapter(page, title: str, story: str, image_path: str):
     """Befüllt das Create-Chapter Formular."""
 
@@ -266,36 +245,33 @@ def upload_to_storyone(title: str, story: str, image_path: str) -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False, slow_mo=SLOWMO)
 
-        for attempt in range(1, 4):          # bis zu 3 Versuche
+        # ── Session prüfen ────────────────────────────────────────────────────
+        if not AUTH_FILE.exists():
+            print("❌ Keine Session gefunden!")
+            print(f"   Bitte zuerst ausführen: python3 setup_login.py")
+            browser.close()
+            return
+
+        for attempt in range(1, 4):
             print(f"\n{'='*50}\n🔄 Versuch {attempt}/3\n{'='*50}")
             context = None
             try:
-                # ── Session laden oder neu erstellen ──────────────────────────
-                if AUTH_FILE.exists() and attempt == 1:
-                    context = browser.new_context(storage_state=str(AUTH_FILE))
-                    print("✅ Gespeicherte Session geladen – kein Login nötig.")
-                else:
-                    context = browser.new_context()
-
+                context = browser.new_context(storage_state=str(AUTH_FILE))
                 page = context.new_page()
                 page.set_viewport_size({"width": 1920, "height": 1080})
 
-                # ── Popup-Killer per init_script ──────────────────────────────
+                # Popups automatisch schließen (Cookie-Banner etc.)
                 page.add_init_script("""
-                    const kill = new MutationObserver(() => {
-                        // Cookie-Banner
+                    new MutationObserver(() => {
                         document.querySelectorAll('button').forEach(b => {
                             if (b.textContent.trim() === 'Accept all') b.click();
                         });
-                        // Alle Modals schließen die KEIN Login-Input haben
                         document.querySelectorAll('button.modal__close-button').forEach(b => {
                             const m = b.closest('[class*="modal"]') || b.parentElement;
                             if (m && !m.querySelector('input[placeholder="E-mail"]'))
                                 b.click();
                         });
-                    });
-                    kill.observe(document.documentElement,
-                                 {childList:true, subtree:true});
+                    }).observe(document.documentElement, {childList:true, subtree:true});
                 """)
 
                 # ── Zur Create-Chapter Seite ──────────────────────────────────
@@ -303,19 +279,9 @@ def upload_to_storyone(title: str, story: str, image_path: str) -> None:
                 page.wait_for_load_state("networkidle")
                 time.sleep(3)
 
-                # ── Login nötig? ──────────────────────────────────────────────
+                # Session abgelaufen?
                 if page.locator("input[placeholder='E-mail']").count() > 0:
-                    print("🔑 Login erforderlich ...")
-                    if AUTH_FILE.exists():
-                        AUTH_FILE.unlink()      # abgelaufene Session löschen
-                    if not _do_login(page):
-                        raise Exception("Login fehlgeschlagen")
-                    # Session für nächste Läufe speichern
-                    context.storage_state(path=str(AUTH_FILE))
-                    print(f"💾 Session gespeichert → {AUTH_FILE}")
-                    page.goto("https://www.story.one/en/start-writing/?type=story#/")
-                    page.wait_for_load_state("networkidle")
-                    time.sleep(3)
+                    raise Exception("Session abgelaufen – bitte setup_login.py erneut ausführen")
 
                 # ── Formular ausfüllen ────────────────────────────────────────
                 _fill_chapter(page, title, story, image_path)
@@ -326,25 +292,22 @@ def upload_to_storyone(title: str, story: str, image_path: str) -> None:
                 print("   → Klicke auf 'Share on StoryOne' zum Veröffentlichen.")
                 print("=" * 60)
                 time.sleep(300)
-                break  # Erfolg – Loop beenden
+                break
 
             except Exception as exc:
                 print(f"\n❌ Fehler in Versuch {attempt}: {exc}")
-                # Screenshot zur Diagnose speichern
                 try:
                     ss = STORIES_DIR / f"error_attempt{attempt}.png"
                     page.screenshot(path=str(ss))
-                    print(f"📸 Screenshot gespeichert: {ss}")
+                    print(f"📸 Screenshot: {ss}")
                 except Exception:
                     pass
-                # Session löschen damit nächster Versuch frisch startet
-                if AUTH_FILE.exists():
-                    AUTH_FILE.unlink()
-                if attempt == 3:
-                    print("❌ Alle 3 Versuche fehlgeschlagen.")
-                else:
-                    print(f"⏳ Warte 5s, dann Versuch {attempt+1} ...")
+                if attempt < 3:
+                    print(f"⏳ Nächster Versuch in 5s ...")
                     time.sleep(5)
+                else:
+                    print("❌ Alle 3 Versuche fehlgeschlagen.")
+                    print("   Falls Session abgelaufen: python3 setup_login.py")
             finally:
                 if context:
                     try:
